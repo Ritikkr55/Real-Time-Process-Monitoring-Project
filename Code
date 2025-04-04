@@ -1,419 +1,403 @@
 # Real-Time-Process-Monitoring
 import psutil
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import threading
 import time
 from datetime import datetime
-import queue
+import math
 
-# Modern Dracula-inspired color scheme
+# Enhanced color scheme
 COLORS = {
-    # Backgrounds
-    'bg_primary': '#282a36',      # Dark purple-gray
-    'bg_secondary': '#44475a',    # Medium purple-gray
-    'bg_tertiary': '#6272a4',     # Light purple-blue
-    
-    # Text
-    'text_primary': '#f8f8f2',    # Off-white
-    'text_secondary': '#bd93f9',  # Light purple
-    'text_tertiary': '#6272a4',   # Gray-blue
-    
-    # Accents
-    'accent_green': '#50fa7b',    # Bright green
-    'accent_red': '#ff5555',      # Coral red
-    'accent_orange': '#ffb86c',   # Peach
-    'accent_pink': '#ff79c6',     # Pink
-    'accent_cyan': '#8be9fd',     # Cyan
-    'accent_purple': '#bd93f9',   # Purple
-    
-    # Status colors
-    'success': '#50fa7b',         # Green
-    'warning': '#ffb86c',         # Orange
-    'error': '#ff5555',           # Red
-    'info': '#8be9fd'             # Cyan
+    'bg_primary': '#1A1A2E',      # Dark navy
+    'bg_secondary': '#16213E',    # Darker blue
+    'bg_tertiary': '#0F3460',     # Deep blue
+    'text_primary': '#E9ECEF',    # Light gray
+    'text_secondary': '#ADB5BD',  # Medium gray
+    'accent_red': '#FF6B6B',      # Bright red
+    'accent_green': '#4ECDC4',    # Turquoise
+    'accent_orange': '#FFD93D',   # Yellow
+    'accent_blue': '#6C5CE7',     # Purple
+    'accent_pink': '#FF8B94',     # Pink
+    'success': '#00B894',         # Mint
+    'warning': '#FDCB6E',         # Gold
+    'error': '#FF7675'           # Coral
 }
 
-# Modern font settings
-FONTS = {
-    'title': ('Segoe UI', 18, 'bold'),
-    'subtitle': ('Segoe UI', 12),
-    'body': ('Segoe UI', 10),
-    'button': ('Segoe UI', 10, 'bold'),
-    'treeview': ('Consolas', 9)  # Monospaced for alignment
-}
+class AnimatedButton(tk.Button):
+    def __init__(self, master=None, hover_color=None, **kwargs):
+        self.hover_color = hover_color
+        super().__init__(master, **kwargs)
+        self.bind('<Enter>', self.on_enter)
+        self.bind('<Leave>', self.on_leave)
+        self.original_bg = kwargs.get('bg', self.cget('bg'))
+        self.original_fg = kwargs.get('fg', self.cget('fg'))
+        
+    def on_enter(self, e):
+        if self.hover_color:
+            self.configure(bg=self.hover_color, fg=self.original_bg)
+        
+    def on_leave(self, e):
+        self.configure(bg=self.original_bg, fg=self.original_fg)
 
-class ProcessMonitorApp:
-    def __init__(self, root):
-        self.root = root
-        self.setup_window()
-        self.setup_styles()
-        self.setup_data_structures()
-        self.setup_ui()
-        self.start_threads()
-        self.update_process_list()
-        
-    def setup_window(self):
-        """Configure the main window"""
-        self.root.title("Process Monitor Pro")
-        self.root.geometry("1400x850")
-        self.root.minsize(1200, 700)
-        self.root.configure(bg=COLORS['bg_primary'])
-        
-        # Make the window slightly transparent for modern look
-        self.root.attributes('-alpha', 0.98)
-        
-    def setup_styles(self):
-        """Configure custom widget styles"""
-        style = ttk.Style()
-        
-        # Main frame style
-        style.configure('Main.TFrame', background=COLORS['bg_primary'])
-        
-        # Button styles
-        style.configure('Primary.TButton',
-                      font=FONTS['button'],
-                      foreground=COLORS['text_primary'],
-                      background=COLORS['bg_tertiary'],
-                      bordercolor=COLORS['accent_purple'],
-                      relief='flat',
-                      padding=8)
-        style.map('Primary.TButton',
-                background=[('active', COLORS['accent_purple'])],
-                foreground=[('active', COLORS['bg_primary'])])
-        
-        # Danger button style
-        style.configure('Danger.TButton',
-                      font=FONTS['button'],
-                      foreground=COLORS['text_primary'],
-                      background=COLORS['error'],
-                      bordercolor=COLORS['error'],
-                      relief='flat',
-                      padding=8)
-        style.map('Danger.TButton',
-                background=[('active', '#ff6e6e')],
-                foreground=[('active', COLORS['text_primary'])])
-        
-        # Entry style
-        style.configure('Modern.TEntry',
-                      fieldbackground=COLORS['bg_secondary'],
-                      foreground=COLORS['text_primary'],
-                      insertcolor=COLORS['accent_cyan'],
-                      relief='flat',
-                      padding=5)
-        
-    def setup_data_structures(self):
-        """Initialize data containers"""
-        self.cpu_usage = []
-        self.mem_usage = []
-        self.graph_update_queue = queue.Queue()
-        self.last_alert_time = 0  # To prevent alert spam
-        
-    def setup_ui(self):
-        """Initialize all UI components"""
-        self.create_title_bar()
-        self.create_main_frames()
-        self.create_process_list()
-        self.create_filter_controls()
-        self.create_action_buttons()
-        self.create_graphs()
-        self.create_status_bar()
-        
-    def create_title_bar(self):
-        """Create the title bar with clock"""
-        title_frame = ttk.Frame(self.root, style='Main.TFrame')
-        title_frame.pack(fill="x", padx=10, pady=(10, 5))
-        
-        # App title with icon
-        title_label = tk.Label(title_frame, 
-                             text="⚡ Process Monitor Pro",
-                             font=FONTS['title'],
-                             bg=COLORS['bg_primary'],
-                             fg=COLORS['accent_purple'])
-        title_label.pack(side="left")
-        
-        # Time display
-        self.time_label = tk.Label(title_frame,
-                                 text="",
-                                 font=FONTS['subtitle'],
-                                 bg=COLORS['bg_primary'],
-                                 fg=COLORS['text_tertiary'])
-        self.time_label.pack(side="right")
-        self.update_time()
-        
-        # Add subtle separator
-        separator = ttk.Separator(self.root, orient='horizontal')
-        separator.pack(fill="x", padx=20, pady=5)
+def create_animated_button(parent, text, command, bg, fg, hover_color, **kwargs):
+    btn = AnimatedButton(parent, text=text, command=command, bg=bg, fg=fg, 
+                        hover_color=hover_color, relief="raised", 
+                        font=('Helvetica', 11, 'bold'), cursor="hand2",
+                        padx=15, pady=8, bd=0, **kwargs)
+    return btn
+
+def get_processes():
+    process_list = []
+    for proc in psutil.process_iter(attrs=['pid', 'name', 'cpu_percent', 'memory_info', 'username', 'nice', 'create_time']):
+        try:
+            info = proc.info
+            info['username'] = info.get('username', "N/A")
+            info['memory_info'] = info['memory_info'].rss // 1024**2 if info['memory_info'] else 0
+            info['create_time'] = datetime.fromtimestamp(info['create_time']).strftime('%Y-%m-%d %H:%M:%S')
+            process_list.append(info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            print(f"Process skipped: {e}")
+    return process_list
+
+def update_process_list():
+    for row in tree.get_children():
+        tree.delete(row)  
+
+    processes = get_processes()
     
-    def update_time(self):
-        """Update the time display every second"""
-        self.time_label.config(text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        self.root.after(1000, self.update_time)
-    
-    def create_main_frames(self):
-        """Create the main application frames"""
-        self.main_frame = ttk.Frame(self.root, style='Main.TFrame')
-        self.main_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+    for process in processes:
+        if filter_var.get() and filter_var.get() != "Filter by Name...":
+            if filter_var.get().lower() not in process['name'].lower():
+                continue  
         
-        # Left frame for process list
-        self.left_frame = ttk.Frame(self.main_frame, style='Main.TFrame')
-        self.left_frame.pack(side="left", fill="both", expand=True)
-        
-        # Right frame for graphs
-        self.right_frame = ttk.Frame(self.main_frame, style='Main.TFrame')
-        self.right_frame.pack(side="right", fill="both", expand=True)
-        
-        # Add subtle shadow effect to frames
-        for frame in [self.left_frame, self.right_frame]:
-            frame.configure(relief="groove", borderwidth=0)
-    
-    def create_process_list(self):
-        """Create the process list Treeview with modern styling"""
-        columns = ("PID", "Name", "User", "CPU%", "Memory (MB)", "Priority", "Created")
-        self.tree = ttk.Treeview(self.left_frame, columns=columns, show="headings", height=20)
-        
-        # Configure columns
-        col_widths = [80, 220, 120, 80, 100, 80, 150]
-        for col, width in zip(columns, col_widths):
-            self.tree.heading(col, text=col, 
-                            command=lambda c=col: self.sort_treeview(c, False),
-                            anchor="center")
-            self.tree.column(col, width=width, anchor="center", stretch=False)
-        
-        # Configure tree style
-        style = ttk.Style()
-        style.configure("Treeview", 
-                      background=COLORS['bg_secondary'],
-                      foreground=COLORS['text_primary'],
-                      fieldbackground=COLORS['bg_secondary'],
-                      rowheight=28,
-                      font=FONTS['treeview'],
-                      borderwidth=0)
-        
-        style.configure("Treeview.Heading",
-                      background=COLORS['bg_tertiary'],
-                      foreground=COLORS['text_primary'],
-                      relief="flat",
-                      font=FONTS['button'],
-                      padding=5)
-        
-        style.map("Treeview.Heading",
-                background=[('active', COLORS['accent_purple'])],
-                foreground=[('active', COLORS['text_primary'])])
-        
-        # Configure tags for CPU usage coloring
-        self.tree.tag_configure('high_cpu', foreground=COLORS['accent_red'])
-        self.tree.tag_configure('medium_cpu', foreground=COLORS['accent_orange'])
-        self.tree.tag_configure('low_cpu', foreground=COLORS['accent_green'])
-        self.tree.tag_configure('selected', background=COLORS['bg_tertiary'])
-        
-        # Add scrollbars with modern styling
-        scrollbar_y = ttk.Scrollbar(self.left_frame, orient="vertical", command=self.tree.yview)
-        scrollbar_x = ttk.Scrollbar(self.left_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-        
-        # Pack tree and scrollbars
-        self.tree.pack(side="left", fill="both", expand=True, padx=(0, 2))
-        scrollbar_y.pack(side="right", fill="y", padx=(0, 5))
-        scrollbar_x.pack(side="bottom", fill="x", pady=(0, 5))
-        
-        # Bind click event
-        self.tree.bind('<ButtonRelease-1>', self.on_tree_click)
-    
-    def create_filter_controls(self):
-        """Create the filter controls with modern styling"""
-        filter_frame = ttk.Frame(self.left_frame)
-        filter_frame.pack(fill="x", pady=(0, 10))
-        
-        # Search icon label
-        search_icon = tk.Label(filter_frame, 
-                             text="🔍", 
-                             font=('Segoe UI', 12),
-                             bg=COLORS['bg_primary'],
-                             fg=COLORS['accent_cyan'])
-        search_icon.pack(side="left", padx=(0, 5))
-        
-        # Filter entry with placeholder text
-        self.filter_var = tk.StringVar()
-        filter_entry = ttk.Entry(filter_frame, 
-                               textvariable=self.filter_var,
-                               style='Modern.TEntry',
-                               font=FONTS['body'])
-        filter_entry.pack(side="left", fill="x", expand=True)
-        filter_entry.insert(0, "Filter by process name...")
-        
-        # Bind events for placeholder behavior
-        filter_entry.bind("<FocusIn>", lambda e: filter_entry.delete(0, tk.END) if filter_entry.get() == "Filter by process name..." else None)
-        filter_entry.bind("<FocusOut>", lambda e: filter_entry.insert(0, "Filter by process name...") if not filter_entry.get() else None)
-        filter_entry.bind("<KeyRelease>", lambda e: self.update_process_list())
-        
-        # Add a clear button
-        clear_btn = ttk.Button(filter_frame, 
-                             text="✕", 
-                             style='Primary.TButton',
-                             command=lambda: [self.filter_var.set(""), self.update_process_list()],
-                             width=2)
-        clear_btn.pack(side="right", padx=(5, 0))
-    
-    def create_action_buttons(self):
-        """Create the action buttons with modern styling"""
-        btn_frame = ttk.Frame(self.left_frame)
-        btn_frame.pack(fill="x", pady=(0, 10))
-        
-        # Button group with consistent styling
-        buttons = [
-            ("⚠ Kill Process", self.kill_process, 'Danger.TButton', COLORS['error']),
-            ("↓ Lower Priority", lambda: self.change_priority(19), 'Primary.TButton', COLORS['accent_orange']),
-            ("↑ Raise Priority", lambda: self.change_priority(-10), 'Primary.TButton', COLORS['accent_green']),
-            ("↻ Refresh", self.update_process_list, 'Primary.TButton', COLORS['accent_cyan'])
-        ]
-        
-        for text, command, style_name, color in buttons:
-            btn = ttk.Button(btn_frame, 
-                           text=text, 
-                           style=style_name,
-                           command=command)
-            btn.pack(side="left", padx=(0, 5))
+        # Enhanced color coding based on CPU usage
+        cpu_percent = float(process['cpu_percent'])
+        if cpu_percent > 80:
+            tag = 'high_cpu'
+            bg_color = COLORS['bg_tertiary']
+        elif cpu_percent > 50:
+            tag = 'medium_cpu'
+            bg_color = COLORS['bg_secondary']
+        else:
+            tag = 'low_cpu'
+            bg_color = COLORS['bg_primary']
             
-            # Add tooltip for better UX
-            ToolTip(btn, text.split(" ")[-1] + " action")
-    
-    def create_graphs(self):
-        """Create the system resource graphs with modern styling"""
-        # Create figure with dark theme
-        plt.style.use('dark_background')
-        self.fig = plt.Figure(figsize=(6, 4.5), dpi=100, facecolor=COLORS['bg_primary'])
-        self.ax1 = self.fig.add_subplot(211)  # CPU
-        self.ax2 = self.fig.add_subplot(212)  # Memory
-        
-        # Configure subplots spacing
-        self.fig.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.1, hspace=0.4)
-        
-        # Create canvas
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=(5, 0))
-        
-        # Set initial graph appearance
-        self.initialize_graph(self.ax1, "CPU Usage", COLORS['accent_pink'])
-        self.initialize_graph(self.ax2, "Memory Usage", COLORS['accent_cyan'])
-    
-    def initialize_graph(self, ax, title, color):
-        """Initialize a graph with consistent styling"""
-        ax.set_title(title, color=COLORS['text_primary'], pad=15, fontsize=12, fontweight='bold')
-        ax.set_xlabel('Time', color=COLORS['text_secondary'], fontsize=10)
-        ax.set_ylabel('Usage (%)', color=COLORS['text_secondary'], fontsize=10)
-        ax.set_facecolor(COLORS['bg_secondary'])
-        ax.set_ylim(0, 100)
-        ax.grid(True, linestyle='--', alpha=0.3, color=COLORS['text_tertiary'])
-        ax.tick_params(colors=COLORS['text_secondary'])
-        
-        # Customize spines (borders)
-        for spine in ax.spines.values():
-            spine.set_color(COLORS['text_tertiary'])
-            spine.set_linewidth(0.5)
-    
-    def create_status_bar(self):
-        """Create a status bar at the bottom"""
-        self.status_frame = ttk.Frame(self.root, style='Main.TFrame')
-        self.status_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
-        # System info labels
-        self.cpu_label = tk.Label(self.status_frame,
-                                text="CPU: 0%",
-                                font=FONTS['body'],
-                                bg=COLORS['bg_primary'],
-                                fg=COLORS['accent_pink'])
-        self.cpu_label.pack(side="left", padx=10)
-        
-        self.mem_label = tk.Label(self.status_frame,
-                                text="Memory: 0%",
-                                font=FONTS['body'],
-                                bg=COLORS['bg_primary'],
-                                fg=COLORS['accent_cyan'])
-        self.mem_label.pack(side="left", padx=10)
-        
-        self.process_count_label = tk.Label(self.status_frame,
-                                          text="Processes: 0",
-                                          font=FONTS['body'],
-                                          bg=COLORS['bg_primary'],
-                                          fg=COLORS['accent_purple'])
-        self.process_count_label.pack(side="left", padx=10)
-        
-        # Version info
-        version_label = tk.Label(self.status_frame,
-                               text="Process Monitor Pro v1.0",
-                               font=FONTS['body'],
-                               bg=COLORS['bg_primary'],
-                               fg=COLORS['text_tertiary'])
-        version_label.pack(side="right", padx=10)
-    
-    def update_status_bar(self, cpu, mem, process_count):
-        """Update the status bar with current metrics"""
-        self.cpu_label.config(text=f"CPU: {cpu:.1f}%")
-        self.mem_label.config(text=f"Memory: {mem:.1f}%")
-        self.process_count_label.config(text=f"Processes: {process_count}")
-        
-        # Color coding based on usage
-        self.cpu_label.config(fg=COLORS['accent_red'] if cpu > 80 else 
-                            COLORS['accent_orange'] if cpu > 50 else 
-                            COLORS['accent_pink'])
-        
-        self.mem_label.config(fg=COLORS['accent_red'] if mem > 80 else 
-                            COLORS['accent_orange'] if mem > 50 else 
-                            COLORS['accent_cyan'])
+        tree.insert("", "end", values=(
+            process['pid'], process['name'], process['username'], 
+            f"{process['cpu_percent']:.1f}", 
+            f"{process['memory_info']:.1f}", 
+            process['nice'],
+            process['create_time']
+        ), tags=(tag,))
 
-# ... [Rest of the class implementation remains the same as previous example] ...
+    check_cpu_memory_alerts() 
+    root.after(3000, update_process_list)  
 
-class ToolTip:
-    """Create a tooltip for a given widget"""
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tip_window = None
-        self.id = None
-        self.x = self.y = 0
-        self.widget.bind("<Enter>", self.show_tip)
-        self.widget.bind("<Leave>", self.hide_tip)
-    
-    def show_tip(self, event=None):
-        """Display text in tooltip window"""
-        if self.tip_window or not self.text:
-            return
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 25
-        
-        self.tip_window = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        
-        label = tk.Label(tw, text=self.text, justify="left",
-                        background="#ffffe0", relief="solid", borderwidth=1,
-                        font=("tahoma", "8", "normal"))
-        label.pack(ipadx=1)
-    
-    def hide_tip(self, event=None):
-        """Destroy tooltip window"""
-        tw = self.tip_window
-        self.tip_window = None
-        if tw:
-            tw.destroy()
+def kill_process():
+    selected_items = tree.selection()
+    if not selected_items:
+        messagebox.showwarning("Warning", "Select a process first!", icon='warning')
+        return
 
-def main():
-    root = tk.Tk()
-    
-    # Set Windows 10/11 theme if available
+    selected_item = selected_items[0]  # Get the first selected item
     try:
-        from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
-    except:
-        pass
-    
-    app = ProcessMonitorApp(root)
-    app.process_graph_updates()  # Start processing graph updates
-    root.mainloop()
+        pid = int(tree.item(selected_item)['values'][0])  # Convert PID to integer
+        process_name = tree.item(selected_item)['values'][1]
+        
+        # Double check if process exists
+        if not psutil.pid_exists(pid):
+            messagebox.showerror("Error", f"Process {process_name} (PID: {pid}) no longer exists!")
+            update_process_list()
+            return
+        
+        # Get process object
+        process = psutil.Process(pid)
+        
+        # Confirm before killing
+        if not messagebox.askyesno("Confirm Process Termination", 
+                                 f"Are you sure you want to terminate process:\nName: {process_name}\nPID: {pid}?",
+                                 icon='warning'):
+            return
 
-if __name__ == "__main__":
-    main()
+        try:
+            # Try SIGTERM first
+            process.terminate()
+            # Wait for up to 3 seconds for the process to terminate
+            process.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            # If SIGTERM doesn't work, try SIGKILL (force kill)
+            try:
+                process.kill()
+            except psutil.NoSuchProcess:
+                pass  # Process already terminated
+            except psutil.AccessDenied as e:
+                messagebox.showerror("Error", 
+                                   "Access denied. Try running the application as administrator.",
+                                   icon='error')
+                return
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to force kill process: {str(e)}")
+                return
+
+        messagebox.showinfo("Success", 
+                          f"Process {process_name} (PID: {pid}) terminated successfully!",
+                          icon='info')
+        update_process_list()
+        
+    except psutil.NoSuchProcess:
+        messagebox.showerror("Error", "Process no longer exists!", icon='error')
+        update_process_list()
+    except psutil.AccessDenied:
+        messagebox.showerror("Error", 
+                           "Access denied. Try running the application as administrator.",
+                           icon='error')
+    except ValueError:
+        messagebox.showerror("Error", "Invalid process ID!", icon='error')
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to terminate process: {str(e)}", icon='error')
+    finally:
+        update_process_list()  # Always refresh the list
+
+def change_priority(value):
+    selected_item = tree.selection()
+    if not selected_item:
+        messagebox.showwarning("Warning", "Select a process first!")
+        return
+
+    pid = tree.item(selected_item)['values'][0]
+    process_name = tree.item(selected_item)['values'][1]
+    
+    try:
+        process = psutil.Process(pid)
+        process.nice(value)
+        messagebox.showinfo("Success", f"Process {process_name} (PID: {pid}) priority changed to {value}!")
+        update_process_list()
+    except psutil.AccessDenied:
+        messagebox.showerror("Error", "Access denied. Try running with administrator privileges.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to change priority: {str(e)}")
+
+def update_graph():
+    while True:
+        cpu_usage.append(psutil.cpu_percent())
+        mem_usage.append(psutil.virtual_memory().percent)
+
+        if len(cpu_usage) > 50:
+            cpu_usage.pop(0)
+            mem_usage.pop(0)
+
+        ax1.clear()
+        ax2.clear()
+
+        # Set background color
+        ax1.set_facecolor(COLORS['bg_secondary'])
+        ax2.set_facecolor(COLORS['bg_secondary'])
+        fig.patch.set_facecolor(COLORS['bg_primary'])
+
+        # Create gradient effect
+        x = range(len(cpu_usage))
+        ax1.plot(x, cpu_usage, color=COLORS['accent_red'], label="CPU Usage (%)", linewidth=2)
+        ax2.plot(x, mem_usage, color=COLORS['accent_blue'], label="Memory Usage (%)", linewidth=2)
+
+        # Add gradient fill
+        ax1.fill_between(x, cpu_usage, alpha=0.3, color=COLORS['accent_red'])
+        ax2.fill_between(x, mem_usage, alpha=0.3, color=COLORS['accent_blue'])
+
+        # Add animated dots
+        if len(cpu_usage) > 0:
+            ax1.plot(x[-1], cpu_usage[-1], 'o', color=COLORS['accent_red'], markersize=8)
+            ax2.plot(x[-1], mem_usage[-1], 'o', color=COLORS['accent_blue'], markersize=8)
+
+        # Customize appearance
+        for ax in [ax1, ax2]:
+            ax.set_title(ax.get_title(), color=COLORS['text_primary'], pad=20, fontsize=12, fontweight='bold')
+            ax.set_xlabel('Time', color=COLORS['text_secondary'], fontsize=10)
+            ax.set_ylabel('Usage (%)', color=COLORS['text_secondary'], fontsize=10)
+            ax.tick_params(colors=COLORS['text_secondary'])
+            ax.grid(True, linestyle='--', alpha=0.2)
+            ax.set_ylim(0, 100)
+            ax.legend(loc="upper right", facecolor=COLORS['bg_secondary'], 
+                     edgecolor=COLORS['text_secondary'], labelcolor=COLORS['text_primary'],
+                     fontsize=10)
+            for spine in ax.spines.values():
+                spine.set_color(COLORS['text_secondary'])
+                spine.set_alpha(0.3)
+
+        canvas.draw()
+        time.sleep(2)
+
+def check_cpu_memory_alerts():
+    cpu = psutil.cpu_percent()
+    memory = psutil.virtual_memory().percent
+
+    if cpu > 80:
+        messagebox.showwarning("High CPU Usage!", f"CPU usage is at {cpu:.1f}%!")
+    if memory > 80:
+        messagebox.showwarning("High Memory Usage!", f"Memory usage is at {memory:.1f}%!")
+
+def on_tree_click(event):
+    region = tree.identify_region(event.x, event.y)
+    if region == "cell":
+        column = tree.identify_column(event.x)
+        column_id = int(column[1]) - 1
+        tree.tag_configure('selected', background=COLORS['accent_blue'])
+        for item in tree.get_children():
+            tree.tag_remove('selected', item)
+        tree.tag_add('selected', tree.identify_row(event.y))
+
+def sort_treeview(col, reverse):
+    items = [(tree.set(item, col), item) for item in tree.get_children('')]
+    items.sort(reverse=reverse)
+    for index, (val, item) in enumerate(items):
+        tree.move(item, '', index)
+    tree.heading(col, command=lambda: sort_treeview(col, not reverse))
+
+def create_title_bar():
+    title_frame = ttk.Frame(root)
+    title_frame.pack(fill="x", padx=10, pady=5)
+    
+    title_label = tk.Label(title_frame, 
+                          text="System Process Monitor", 
+                          font=('Helvetica', 16, 'bold'),
+                          bg=COLORS['bg_primary'],
+                          fg=COLORS['accent_green'])
+    title_label.pack(side="left")
+    
+    time_label = tk.Label(title_frame,
+                         text="",
+                         font=('Helvetica', 12),
+                         bg=COLORS['bg_primary'],
+                         fg=COLORS['text_secondary'])
+    time_label.pack(side="right")
+    
+    def update_time():
+        time_label.config(text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        root.after(1000, update_time)
+    
+    update_time()
+
+root = tk.Tk()
+root.title("Real-Time Process Monitoring Dashboard")
+root.geometry("1300x800")
+
+# Configure root window
+root.configure(bg=COLORS['bg_primary'])
+
+# Create title bar
+create_title_bar()
+
+# Create main frame with rounded corners
+main_frame = ttk.Frame(root)
+main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+# Create left frame for process list
+left_frame = ttk.Frame(main_frame)
+left_frame.pack(side="left", fill="both", expand=True)
+
+# Create right frame for graphs
+right_frame = ttk.Frame(main_frame)
+right_frame.pack(side="right", fill="both", expand=True)
+
+# Process list
+columns = ("PID", "Name", "User", "CPU%", "Memory (MB)", "Priority", "Created")
+tree = ttk.Treeview(left_frame, columns=columns, show="headings", height=15)
+
+# Configure columns
+for col in columns:
+    tree.heading(col, text=col, command=lambda c=col: sort_treeview(c, False))
+    tree.column(col, anchor="center", width=100)
+
+# Configure tree style
+style = ttk.Style()
+style.configure("Treeview", 
+                background=COLORS['bg_secondary'],
+                foreground=COLORS['text_primary'],
+                fieldbackground=COLORS['bg_secondary'],
+                rowheight=30)
+style.configure("Treeview.Heading",
+                background=COLORS['bg_primary'],
+                foreground=COLORS['text_primary'],
+                relief="flat",
+                font=('Helvetica', 10, 'bold'))
+style.map("Treeview.Heading",
+          background=[('active', COLORS['accent_blue'])],
+          foreground=[('active', COLORS['text_primary'])])
+
+# Configure tags for CPU usage coloring
+tree.tag_configure('high_cpu', foreground=COLORS['accent_red'])
+tree.tag_configure('medium_cpu', foreground=COLORS['accent_orange'])
+tree.tag_configure('low_cpu', foreground=COLORS['accent_green'])
+tree.tag_configure('selected', background=COLORS['accent_blue'])
+
+# Add scrollbars
+scrollbar_y = ttk.Scrollbar(left_frame, orient="vertical", command=tree.yview)
+scrollbar_x = ttk.Scrollbar(left_frame, orient="horizontal", command=tree.xview)
+tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+
+# Pack tree and scrollbars
+tree.pack(side="left", fill="both", expand=True)
+scrollbar_y.pack(side="right", fill="y")
+scrollbar_x.pack(side="bottom", fill="x")
+
+# Filter frame with modern design
+filter_frame = ttk.Frame(left_frame)
+filter_frame.pack(fill="x", pady=10)
+
+filter_var = tk.StringVar()
+filter_entry = tk.Entry(filter_frame, textvariable=filter_var,
+                       font=('Helvetica', 10),
+                       bg=COLORS['bg_tertiary'],
+                       fg=COLORS['text_primary'],
+                       insertbackground=COLORS['text_primary'])
+filter_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+filter_entry.insert(0, "Filter by Name...")
+filter_entry.bind("<FocusIn>", lambda event: filter_entry.delete(0, tk.END))
+
+# Button frame with modern design
+btn_frame = ttk.Frame(left_frame)
+btn_frame.pack(fill="x", pady=10)
+
+# Create animated buttons with improved styling
+kill_btn = create_animated_button(btn_frame, "⚠ Kill Process", kill_process,
+                                COLORS['accent_red'], COLORS['text_primary'],
+                                COLORS['error'], width=15)
+kill_btn.pack(side="left", padx=5)
+
+low_priority_btn = create_animated_button(btn_frame, "↓ Lower Priority", 
+                                        lambda: change_priority(19),
+                                        COLORS['accent_orange'], COLORS['text_primary'],
+                                        COLORS['warning'], width=15)
+low_priority_btn.pack(side="left", padx=5)
+
+high_priority_btn = create_animated_button(btn_frame, "↑ Raise Priority",
+                                         lambda: change_priority(-10),
+                                         COLORS['accent_green'], COLORS['text_primary'],
+                                         COLORS['success'], width=15)
+high_priority_btn.pack(side="left", padx=5)
+
+# Add a refresh button
+refresh_btn = create_animated_button(btn_frame, "↻ Refresh",
+                                   update_process_list,
+                                   COLORS['accent_blue'], COLORS['text_primary'],
+                                   COLORS['accent_pink'], width=15)
+refresh_btn.pack(side="right", padx=5)
+
+# Graphs with modern design
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 4))
+canvas = FigureCanvasTkAgg(fig, master=right_frame)
+canvas.get_tk_widget().pack(fill="both", expand=True)
+
+cpu_usage = []
+mem_usage = []
+
+# Bind click event
+tree.bind('<ButtonRelease-1>', on_tree_click)
+
+# Start update threads
+threading.Thread(target=update_graph, daemon=True).start()
+update_process_list()
+
+root.mainloop()
