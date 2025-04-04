@@ -2,7 +2,7 @@
 
 ## Overview
 
-Real-Time Process Monitoring is a project aimed at providing real-time insights into system processes. It helps in tracking, analyzing, and visualizing the performance of various processes running on a system. This tool is essential for system administrators, developers, and anyone interested in maintaining the health and performance of their systems.
+The goal of the Real-Time Process Monitoring project is to offer real-time insights into system operations. It facilitates monitoring, evaluating, and displaying the effectiveness of different system processes. For developers, system administrators, and anybody else interested in preserving the functionality and health of their systems, this tool is indispensable.
 
 ## Features
 
