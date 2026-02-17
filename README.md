@@ -40,7 +40,3 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 ww.chartjs.org/)
-
-## Contact
-
-For any questions or inquiries, please contact [Avneet Chaudhary](mailto:avneetchaudharycool9199@gmail.com).
